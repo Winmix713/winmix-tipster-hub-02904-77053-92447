@@ -15,7 +15,7 @@ const Matches = () => {
   const { data: leagues, isLoading: leaguesLoading } = useQuery({
     queryKey: ['leagues', leagueType],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('leagues')
         .select('*')
         .eq('league_type', leagueType)
@@ -37,11 +37,11 @@ const Matches = () => {
     queryFn: async () => {
       if (!selectedLeagueId) return [];
 
-      const { data, error } = await supabase
+      const { data, error } = await (supabase as any)
         .from('matches')
         .select('*')
         .eq('league_id', selectedLeagueId)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false});
 
       if (error) throw error;
       return data as Match[];
