@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 11 11% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 11 11% 8%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 11 11% 8%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 160 84% 39%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 18 100% 60%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 215 20% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 160 84% 39%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 215 20% 17%;
+    --input: 215 20% 17%;
+    --ring: 160 84% 39%;
+
+    --radius: 1rem;
+
+    --glass-bg: 0 0% 100% / 0.05;
+    --glass-border: 0 0% 100% / 0.1;
+    --glow-orange: 18 100% 60%;
+    --glow-emerald: 160 84% 39%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-black text-foreground antialiased selection:bg-primary/20 selection:text-primary;
+    font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10;
+  }
+  
+  .glass-card-hover {
+    @apply glass-card hover:bg-white/10 hover:border-white/20 transition-all duration-300;
+  }
+
+  .text-gradient-emerald {
+    @apply bg-gradient-to-r from-emerald-300 via-emerald-400 to-emerald-500 bg-clip-text text-transparent;
+  }
+
+  .glow-orange {
+    box-shadow: 0 0 60px hsl(var(--glow-orange) / 0.2);
+  }
+
+  .glow-emerald {
+    box-shadow: 0 0 60px hsl(var(--glow-emerald) / 0.3);
+  }
+}
