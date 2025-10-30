@@ -1,0 +1,1066 @@
+\`\`\`
+
+#### 5.11 Form Surge Detection
+\`\`\`typescript
+async function detectFormSurge(teamName: string, leagueId: string) {
+  const last3Matches = await getRecentMatches(teamName, leagueId, 3);
+  const previous3Matches = await getRecentMatches(teamName, leagueId, 6).slice(3);
+  
+  const recentFormIndex = calculateFormIndex(last3Matches, teamName);
+  const previousFormIndex = calculateFormIndex(previous3Matches, teamName);
+  
+  const formChange = ((recentFormIndex - previousFormIndex) / previousFormIndex) * 100;
+  
+  if (formChange >= 30) {
+    return {
+      pattern_type: 'form_surge',
+      confidence: Math.min(0.70 + (formChange / 100), 0.95),
+      strength: Math.min(formChange / 100, 1.0),
+      pattern_data: {
+        form_change_percent: formChange,
+        recent_form_index: recentFormIndex,
+        previous_form_index: previousFormIndex,
+        recent_results: last3Matches.map(m => getMatchResult(m, teamName)),
+        previous_results: previous3Matches.map(m => getMatchResult(m, teamName))
+      }
+    };
+  }
+  
+  return null;
+}
+\`\`\`
+
+### 🔄 Adatfolyamat
+
+\`\`\`
+┌─────────────────────────────────────────────────────────────┐
+│     Scheduled Job: detect-patterns (Daily 4:00 AM)         │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Minden Csapat Iterálása (Párhuzamosan)             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │ Arsenal      │  │ Liverpool    │  │ Man City     │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│           Pattern Detection Functions Futtatása             │
+│  - detectStreak()                                           │
+│  - detectHomeDominance()                                    │
+│  - detectHighScoring()                                      │
+│  - detectDefensiveSolid()                                   │
+│  - detectBTTSSpecialist()                                   │
+│  - detectFormSurge()                                        │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Minták Mentése / Frissítése                    │
+│  - Új minta → INSERT INTO team_patterns                    │
+│  - Meglévő minta → UPDATE confidence, strength             │
+│  - Lejárt minta → SET valid_until = now()                  │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Minták Integrálása Predikciókba                     │
+│  - Predikció készítésekor lekéri az aktív mintákat         │
+│  - Súlyozza a predikciót a minták alapján                  │
+│  - Növeli a confidence-t ha erős minta van                 │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Frontend Megjelenítés                          │
+│  - TeamDetail oldalon "Felismert Minták" szekció          │
+│  - Badge-ek színkódolva                                     │
+│  - Tooltip részletes infóval                               │
+└─────────────────────────────────────────────────────────────┘
+\`\`\`
+
+### 📊 Pattern Impact on Predictions
+
+**Súlyozási Logika:**
+\`\`\`typescript
+function adjustPredictionWithPatterns(
+  basePrediction: Prediction,
+  patterns: TeamPattern[]
+): Prediction {
+  let adjustedPrediction = { ...basePrediction };
+  
+  for (const pattern of patterns) {
+    switch (pattern.pattern_type) {
+      case 'winning_streak':
+        // Növeli a győzelmi esélyt
+        adjustedPrediction.win_probability *= (1 + pattern.strength * 0.15);
+        adjustedPrediction.confidence *= (1 + pattern.confidence * 0.10);
+        break;
+        
+      case 'home_dominance':
+        // Csak hazai meccseknél
+        if (basePrediction.is_home_match) {
+          adjustedPrediction.win_probability *= (1 + pattern.strength * 0.20);
+        }
+        break;
+        
+      case 'high_scoring':
+        // Növeli a várható gólokat
+        adjustedPrediction.expected_goals *= (1 + pattern.strength * 0.25);
+        adjustedPrediction.over_2_5_probability *= (1 + pattern.strength * 0.15);
+        break;
+        
+      case 'defensive_solid':
+        // Csökkenti a kapott gólokat
+        adjustedPrediction.expected_goals_conceded *= (1 - pattern.strength * 0.20);
+        break;
+        
+      case 'form_surge':
+        // Általános confidence boost
+        adjustedPrediction.confidence *= (1 + pattern.strength * 0.12);
+        break;
+    }
+  }
+  
+  // Normalizálás (valószínűségek ne lépjék túl az 1.0-t)
+  adjustedPrediction.win_probability = Math.min(adjustedPrediction.win_probability, 0.95);
+  adjustedPrediction.confidence = Math.min(adjustedPrediction.confidence, 0.95);
+  
+  return adjustedPrediction;
+}
+\`\`\`
+
+---
+
+## 🏆 Fázis 6: Champion/Challenger Framework
+
+### 🎯 Cél
+Több predikciós model párhuzamos futtatása, automatikus teljesítmény összehasonlítás, és a legjobb model automatikus promóciója.
+
+### 🗄️ Database Komponensek
+
+#### 6.1 `model_registry` Tábla
+\`\`\`sql
+CREATE TABLE model_registry (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  model_name TEXT NOT NULL,
+  model_version TEXT NOT NULL,
+  model_type TEXT NOT NULL, -- 'champion', 'challenger', 'retired'
+  
+  -- Model Details
+  description TEXT,
+  algorithm TEXT, -- 'poisson', 'elo', 'ml_ensemble', 'neural_network'
+  hyperparameters JSONB,
+  
+  -- Deployment Info
+  deployed_at TIMESTAMPTZ,
+  deployed_by TEXT,
+  traffic_allocation DECIMAL(3,2) DEFAULT 0.00, -- 0.00 - 1.00 (percentage of traffic)
+  
+  -- Performance Metrics
+  total_predictions INTEGER DEFAULT 0,
+  correct_predictions INTEGER DEFAULT 0,
+  current_accuracy DECIMAL(5,2),
+  avg_confidence DECIMAL(3,2),
+  avg_css_score DECIMAL(3,1),
+  
+  -- Status
+  status TEXT DEFAULT 'active', -- 'active', 'testing', 'retired', 'failed'
+  last_evaluated_at TIMESTAMPTZ,
+  
+  -- Metadata
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  
+  UNIQUE(model_name, model_version)
+);
+
+-- Indexek
+CREATE INDEX idx_model_registry_type ON model_registry(model_type);
+CREATE INDEX idx_model_registry_status ON model_registry(status);
+CREATE INDEX idx_model_registry_accuracy ON model_registry(current_accuracy DESC);
+
+-- Kezdeti modellek
+INSERT INTO model_registry (model_name, model_version, model_type, algorithm, traffic_allocation, status) VALUES
+('Poisson Model', 'v1.0', 'champion', 'poisson', 0.90, 'active'),
+('Elo Model', 'v1.0', 'challenger', 'elo', 0.10, 'testing');
+\`\`\`
+
+#### 6.2 `model_experiments` Tábla
+\`\`\`sql
+CREATE TABLE model_experiments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  experiment_name TEXT NOT NULL,
+  champion_model_id UUID REFERENCES model_registry(id),
+  challenger_model_id UUID REFERENCES model_registry(id),
+  
+  -- Experiment Config
+  start_date DATE NOT NULL,
+  end_date DATE,
+  target_sample_size INTEGER DEFAULT 100,
+  significance_threshold DECIMAL(4,3) DEFAULT 0.05, -- p-value
+  
+  -- Results
+  champion_accuracy DECIMAL(5,2),
+  challenger_accuracy DECIMAL(5,2),
+  accuracy_diff DECIMAL(5,2),
+  statistical_significance DECIMAL(4,3), -- p-value
+  winner TEXT, -- 'champion', 'challenger', 'tie', 'ongoing'
+  
+  -- Decision
+  decision TEXT, -- 'promote_challenger', 'keep_champion', 'continue_testing'
+  decision_made_at TIMESTAMPTZ,
+  decision_reason TEXT,
+  
+  -- Metadata
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+\`\`\`
+
+#### 6.3 `model_predictions` Tábla (Bővítés)
+\`\`\`sql
+-- Hozzáadás a meglévő predictions táblához
+ALTER TABLE predictions ADD COLUMN model_id UUID REFERENCES model_registry(id);
+ALTER TABLE predictions ADD COLUMN model_name TEXT;
+ALTER TABLE predictions ADD COLUMN model_version TEXT;
+ALTER TABLE predictions ADD COLUMN is_shadow_mode BOOLEAN DEFAULT false;
+
+CREATE INDEX idx_predictions_model_id ON predictions(model_id);
+CREATE INDEX idx_predictions_shadow ON predictions(is_shadow_mode);
+\`\`\`
+
+### 🔧 API Endpoints
+
+#### 6.4 `/api/models/register` - Új Model Regisztrálása
+**Method:** POST  
+**Body:**
+\`\`\`typescript
+{
+  model_name: string;
+  model_version: string;
+  model_type: 'champion' | 'challenger';
+  algorithm: string;
+  description?: string;
+  hyperparameters?: Record<string, any>;
+  traffic_allocation?: number; // 0.00 - 1.00
+}
+\`\`\`
+
+#### 6.5 `/api/models/select` - Model Kiválasztása (Epsilon-Greedy)
+**Method:** GET  
+**Query Params:** `?match_id=xxx`  
+**Response:**
+\`\`\`typescript
+{
+  selected_model: {
+    id: string;
+    model_name: string;
+    model_version: string;
+    model_type: 'champion' | 'challenger';
+    traffic_allocation: number;
+  };
+  selection_reason: 'champion' | 'challenger_test' | 'random';
+  epsilon: number; // Current exploration rate
+}
+\`\`\`
+
+**Működés (Epsilon-Greedy):**
+\`\`\`typescript
+function selectModel(epsilon: number = 0.10): Model {
+  const random = Math.random();
+  
+  if (random < epsilon) {
+    // Exploration: Select challenger
+    return getChallengerModel();
+  } else {
+    // Exploitation: Select champion
+    return getChampionModel();
+  }
+}
+\`\`\`
+
+#### 6.6 `/api/models/shadow-run` - Shadow Mode Futtatás
+**Method:** POST  
+**Body:**
+\`\`\`typescript
+{
+  match_id: string;
+  champion_model_id: string;
+  challenger_model_id: string;
+}
+\`\`\`
+**Működés:**
+1. Futtatja mindkét modellt párhuzamosan
+2. Champion predikciót visszaadja a usernek
+3. Challenger predikciót elmenti `is_shadow_mode = true` flag-gel
+4. Később összehasonlítja az eredményeket
+
+#### 6.7 `/api/models/promote` - Model Promóció
+**Method:** POST  
+**Body:**
+\`\`\`typescript
+{
+  challenger_model_id: string;
+  reason: string;
+}
+\`\`\`
+**Működés:**
+1. Jelenlegi champion → `model_type = 'retired'`
+2. Challenger → `model_type = 'champion'`, `traffic_allocation = 0.90`
+3. Új challenger regisztrálása (ha van)
+
+#### 6.8 `/api/experiments/create` - Új Experiment Indítása
+**Method:** POST  
+**Body:**
+\`\`\`typescript
+{
+  experiment_name: string;
+  champion_model_id: string;
+  challenger_model_id: string;
+  target_sample_size: number;
+  duration_days: number;
+}
+\`\`\`
+
+#### 6.9 `/api/experiments/evaluate` - Experiment Értékelése
+**Method:** POST  
+**Body:**
+\`\`\`typescript
+{
+  experiment_id: string;
+}
+\`\`\`
+**Response:**
+\`\`\`typescript
+{
+  experiment_name: string;
+  champion_accuracy: number;
+  challenger_accuracy: number;
+  accuracy_diff: number;
+  statistical_significance: number; // p-value
+  winner: 'champion' | 'challenger' | 'tie';
+  decision: 'promote_challenger' | 'keep_champion' | 'continue_testing';
+  decision_reason: string;
+  sample_size: number;
+  confidence_interval: { lower: number; upper: number };
+}
+\`\`\`
+
+**Statisztikai Teszt (Chi-Square Test):**
+\`\`\`typescript
+function evaluateExperiment(experimentId: string) {
+  const championPredictions = getPredictions(championModelId);
+  const challengerPredictions = getPredictions(challengerModelId);
+  
+  const championAccuracy = calculateAccuracy(championPredictions);
+  const challengerAccuracy = calculateAccuracy(challengerPredictions);
+  
+  const pValue = chiSquareTest(championPredictions, challengerPredictions);
+  
+  let decision: string;
+  let winner: string;
+  
+  if (pValue < 0.05) {
+    // Statistically significant difference
+    if (challengerAccuracy > championAccuracy + 0.05) {
+      // Challenger is 5%+ better
+      decision = 'promote_challenger';
+      winner = 'challenger';
+    } else {
+      decision = 'keep_champion';
+      winner = 'champion';
+    }
+  } else {
+    // No significant difference
+    decision = 'continue_testing';
+    winner = 'tie';
+  }
+  
+  return { championAccuracy, challengerAccuracy, pValue, decision, winner };
+}
+\`\`\`
+
+### 🎨 Frontend Komponensek
+
+#### 6.10 `/app/models/page.tsx` - Model Management Dashboard
+**Új oldal létrehozása**
+
+**Szekciók:**
+1. **Active Models Card**
+   - Champion model (nagy kártya, zöld border)
+   - Challenger model(ek) (kisebb kártyák, sárga border)
+   - Retired models (szürke, collapsed)
+
+2. **Model Comparison Chart**
+   - Line chart: Accuracy over time (champion vs challenger)
+   - Bar chart: Side-by-side accuracy comparison
+
+3. **Traffic Allocation Pie Chart**
+   - Champion: 90%
+   - Challenger: 10%
+
+4. **Experiments Table**
+   - Experiment name | Start date | Status | Winner | Action
+   - "View Details" gomb
+
+5. **Promote Challenger Button**
+   - Csak akkor enabled, ha challenger > champion + 5%
+   - Confirmation modal
+
+#### 6.11 `ModelCard` Komponens
+\`\`\`typescript
+<Card className={modelType === 'champion' ? 'border-green-500' : 'border-yellow-500'}>
+  <CardHeader>
+    <div className="flex items-center justify-between">
+      <div>
+        <CardTitle>{modelName} {modelVersion}</CardTitle>
+        <CardDescription>{algorithm}</CardDescription>
+      </div>
+      <Badge variant={modelType === 'champion' ? 'success' : 'warning'}>
+        {modelType === 'champion' ? '👑 Champion' : '🥊 Challenger'}
+      </Badge>
+    </div>
+  </CardHeader>
+  <CardContent>
+    <div className="space-y-2">
+      <div className="flex justify-between">
+        <span>Accuracy:</span>
+        <span className="font-bold">{accuracy}%</span>
+      </div>
+      <div className="flex justify-between">
+        <span>Predictions:</span>
+        <span>{totalPredictions}</span>
+      </div>
+      <div className="flex justify-between">
+        <span>Traffic:</span>
+        <span>{trafficAllocation * 100}%</span>
+      </div>
+      <Progress value={accuracy} className="h-2" />
+    </div>
+  </CardContent>
+  <CardFooter>
+    <Button variant="outline" size="sm" onClick={onViewDetails}>
+      View Details
+    </Button>
+  </CardFooter>
+</Card>
+\`\`\`
+
+### 🔄 Adatfolyamat
+
+\`\`\`
+┌─────────────────────────────────────────────────────────────┐
+│              User Kér Egy Predikciót                        │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         GET /api/models/select (Epsilon-Greedy)             │
+│  - 90% esély: Champion model                               │
+│  - 10% esély: Challenger model                             │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Kiválasztott Model Futtatása                   │
+│  - Predikció számítás                                       │
+│  - Mentés predictions táblába (model_id, model_name)       │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Shadow Mode: Másik Model is Fut (Háttérben)        │
+│  - Challenger predikció számítás                           │
+│  - Mentés is_shadow_mode = true flag-gel                   │
+│  - User nem látja ezt a predikciót                         │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Mérkőzés Lejátszódik                           │
+│  - Eredmény beérkezik                                       │
+│  - Mindkét predikció accuracy-je kiszámolódik              │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│    Scheduled Job: evaluate-experiments (Daily)              │
+│  - Összehasonlítja champion vs challenger accuracy-t       │
+│  - Statisztikai teszt (Chi-Square, p-value)                │
+│  - Ha challenger > champion + 5% AND p < 0.05:             │
+│    → Automatikus promóció javaslat                         │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Admin Döntés (vagy Auto-Promote)               │
+│  - Ha auto-promote enabled: Automatikus promóció           │
+│  - Ha manual: Email notification adminnak                  │
+│  - Promóció után: Challenger → Champion                    │
+└─────────────────────────────────────────────────────────────┘
+\`\`\`
+
+### 📊 Automatikus Promóció Logika
+
+\`\`\`typescript
+// Scheduled Job: auto-promote-models (Weekly)
+async function autoPromoteModels() {
+  const experiments = await getActiveExperiments();
+  
+  for (const experiment of experiments) {
+    const evaluation = await evaluateExperiment(experiment.id);
+    
+    // Promóció feltételek:
+    // 1. Challenger accuracy > Champion accuracy + 5%
+    // 2. Statisztikai szignifikancia (p < 0.05)
+    // 3. Minimum 100 predikció mindkét modellnél
+    // 4. Minimum 2 hét tesztelés
+    
+    const shouldPromote = (
+      evaluation.challengerAccuracy > evaluation.championAccuracy + 0.05 &&
+      evaluation.pValue < 0.05 &&
+      evaluation.sampleSize >= 100 &&
+      daysSince(experiment.start_date) >= 14
+    );
+    
+    if (shouldPromote) {
+      await promoteChallenger(experiment.challenger_model_id, {
+        reason: `Challenger outperformed champion by ${evaluation.accuracy_diff}% (p=${evaluation.pValue})`,
+        experiment_id: experiment.id
+      });
+      
+      await notifyAdmin({
+        subject: '🏆 Model Promoted: New Champion!',
+        message: `Challenger model has been automatically promoted to champion.`,
+        details: evaluation
+      });
+    }
+  }
+}
+\`\`\`
+
+---
+
+## 🌍 Fázis 7: Cross-League Intelligence
+
+### 🎯 Cél
+Liga-közti korrelációk felismerése, meta-minták felfedezése, és univerzális football insights generálása.
+
+### 🗄️ Database Komponensek
+
+#### 7.1 `cross_league_correlations` Tábla
+\`\`\`sql
+CREATE TABLE cross_league_correlations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  league_a_id UUID REFERENCES leagues(id),
+  league_b_id UUID REFERENCES leagues(id),
+  
+  -- Correlation Metrics
+  correlation_type TEXT NOT NULL, -- 'scoring_rate', 'defensive_strength', 'home_advantage', 'form_consistency'
+  correlation_coefficient DECIMAL(4,3), -- -1.00 to 1.00 (Pearson correlation)
+  correlation_strength TEXT, -- 'strong', 'moderate', 'weak', 'none'
+  
+  -- Statistical Significance
+  p_value DECIMAL(5,4),
+  sample_size INTEGER,
+  confidence_interval JSONB, -- { lower: -0.15, upper: 0.45 }
+  
+  -- Insights
+  insight_summary TEXT,
+  actionable_recommendation TEXT,
+  
+  -- Validity
+  calculated_at TIMESTAMPTZ DEFAULT now(),
+  valid_until TIMESTAMPTZ,
+  
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  
+  UNIQUE(league_a_id, league_b_id, correlation_type)
+);
+
+-- Indexek
+CREATE INDEX idx_cross_league_corr_leagues ON cross_league_correlations(league_a_id, league_b_id);
+CREATE INDEX idx_cross_league_corr_type ON cross_league_correlations(correlation_type);
+CREATE INDEX idx_cross_league_corr_strength ON cross_league_correlations(correlation_coefficient DESC);
+\`\`\`
+
+#### 7.2 `meta_patterns` Tábla
+\`\`\`sql
+CREATE TABLE meta_patterns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  pattern_name TEXT NOT NULL UNIQUE,
+  pattern_type TEXT NOT NULL, -- 'universal_truth', 'counter_intuitive', 'league_specific'
+  
+  -- Pattern Description
+  description TEXT NOT NULL,
+  discovery_method TEXT, -- 'statistical_analysis', 'ml_discovery', 'manual_observation'
+  
+  -- Evidence
+  supporting_leagues TEXT[], -- Array of league names
+  evidence_strength DECIMAL(3,2), -- 0.00 - 1.00
+  sample_size INTEGER,
+  
+  -- Statistical Validation
+  statistical_significance DECIMAL(5,4), -- p-value
+  confidence_level DECIMAL(3,2), -- 0.95 = 95% confidence
+  
+  -- Impact
+  prediction_impact DECIMAL(3,2), -- How much this affects predictions
+  accuracy_improvement DECIMAL(4,2), -- % improvement when applied
+  
+  -- Pattern Data
+  pattern_data JSONB, -- Detailed pattern information
+  
+  -- Status
+  status TEXT DEFAULT 'active', -- 'active', 'testing', 'deprecated'
+  validated_at TIMESTAMPTZ,
+  
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Példa meta-minták
+INSERT INTO meta_patterns (pattern_name, pattern_type, description, supporting_leagues, evidence_strength) VALUES
+('Form Always Wins', 'universal_truth', 'Csapat jelenlegi formája erősebb prediktor mint a történelmi teljesítmény', ARRAY['Premier League', 'La Liga', 'Bundesliga'], 0.87),
+('Home Advantage Decay', 'universal_truth', 'Hazai előny csökken a szezon végéhez közeledve', ARRAY['Premier League', 'La Liga'], 0.72),
+('Underdog Surge', 'counter_intuitive', 'Kiesés ellen küzdő csapatok váratlanul jól teljesítenek a szezon utolsó 5 hetében', ARRAY['Premier League', 'Serie A'], 0.68),
+('Derby Unpredictability', 'universal_truth', 'Derby meccsek 30%-kal kevésbé prediktálhatóak mint normál meccsek', ARRAY['Premier League', 'La Liga', 'Bundesliga', 'Serie A'], 0.91);
+\`\`\`
+
+#### 7.3 `league_characteristics` Tábla
+\`\`\`sql
+CREATE TABLE league_characteristics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  league_id UUID REFERENCES leagues(id) UNIQUE,
+  league_name TEXT NOT NULL,
+  
+  -- Scoring Characteristics
+  avg_goals_per_match DECIMAL(3,2),
+  avg_home_goals DECIMAL(3,2),
+  avg_away_goals DECIMAL(3,2),
+  btts_percentage DECIMAL(3,2),
+  over_2_5_percentage DECIMAL(3,2),
+  
+  -- Competitive Balance
+  competitive_balance_index DECIMAL(3,2), -- 0.00 - 1.00 (1.00 = perfectly balanced)
+  dominance_factor DECIMAL(3,2), -- How dominant are top teams
+  upset_frequency DECIMAL(3,2), -- % of unexpected results
+  
+  -- Playing Style
+  avg_possession_differential DECIMAL(3,2),
+  avg_shots_per_match DECIMAL(3,2),
+  avg_corners_per_match DECIMAL(3,2),
+  physicality_index DECIMAL(3,2), -- Based on fouls, cards
+  
+  -- Home Advantage
+  home_win_percentage DECIMAL(3,2),
+  home_advantage_strength DECIMAL(3,2), -- 0.00 - 1.00
+  
+  -- Predictability
+  predictability_score DECIMAL(3,2), -- 0.00 - 1.00 (1.00 = highly predictable)
+  form_consistency DECIMAL(3,2), -- How consistent are team forms
+  
+  -- Temporal Patterns
+  seasonal_trends JSONB, -- { "early_season": {...}, "mid_season": {...}, "late_season": {...} }
+  
+  -- Metadata
+  calculated_at TIMESTAMPTZ DEFAULT now(),
+  season TEXT,
+  
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+\`\`\`
+
+### 🔧 API Endpoints
+
+#### 7.4 `/api/cross-league/correlations` - Liga Korrelációk
+**Method:** GET  
+**Query Params:** `?league_a=premier-league&league_b=la-liga&type=scoring_rate`  
+**Response:**
+\`\`\`typescript
+{
+  league_a: { id: string; name: string };
+  league_b: { id: string; name: string };
+  correlations: Array<{
+    correlation_type: string;
+    correlation_coefficient: number; // -1.00 to 1.00
+    correlation_strength: 'strong' | 'moderate' | 'weak' | 'none';
+    p_value: number;
+    insight_summary: string;
+    actionable_recommendation: string;
+  }>;
+}
+\`\`\`
+
+#### 7.5 `/api/cross-league/analyze` - Liga Összehasonlítás
+**Method:** POST  
+**Body:**
+\`\`\`typescript
+{
+  league_ids: string[];
+  metrics: string[]; // ['scoring_rate', 'home_advantage', 'predictability']
+}
+\`\`\`
+**Response:**
+\`\`\`typescript
+{
+  leagues: Array<{
+    league_id: string;
+    league_name: string;
+    characteristics: {
+      avg_goals_per_match: number;
+      home_win_percentage: number;
+      predictability_score: number;
+      competitive_balance_index: number;
+    };
+  }>;
+  comparisons: Array<{
+    metric: string;
+    league_rankings: Array<{ league_name: string; value: number; rank: number }>;
+    insights: string[];
+  }>;
+}
+\`\`\`
+
+#### 7.6 `/api/meta-patterns/discover` - Meta-Minták Felfedezése
+**Method:** POST  
+**Body:**
+\`\`\`typescript
+{
+  min_leagues: number; // Minimum hány ligában kell megjelennie
+  min_evidence_strength: number; // 0.00 - 1.00
+}
+\`\`\`
+**Response:**
+\`\`\`typescript
+{
+  discovered_patterns: Array<{
+    pattern_name: string;
+    pattern_type: string;
+    description: string;
+    supporting_leagues: string[];
+    evidence_strength: number;
+    prediction_impact: number;
+    accuracy_improvement: number;
+  }>;
+  total_discovered: number;
+}
+\`\`\`
+
+#### 7.7 `/api/meta-patterns/apply` - Meta-Minta Alkalmazása
+**Method:** POST  
+**Body:**
+\`\`\`typescript
+{
+  pattern_id: string;
+  match_id: string;
+}
+\`\`\`
+**Response:**
+\`\`\`typescript
+{
+  original_prediction: Prediction;
+  adjusted_prediction: Prediction;
+  applied_patterns: Array<{
+    pattern_name: string;
+    adjustment_factor: number;
+    confidence_boost: number;
+  }>;
+}
+\`\`\`
+
+### 🎨 Frontend Komponensek
+
+#### 7.8 `/app/cross-league/page.tsx` - Cross-League Dashboard
+**Új oldal létrehozása**
+
+**Szekciók:**
+1. **League Comparison Matrix**
+   - Heatmap: Liga vs Liga korrelációk
+   - Hover: Részletes correlation info
+
+2. **League Characteristics Radar Chart**
+   - Több liga összehasonlítása radar chart-on
+   - Metrics: Scoring, Home Advantage, Predictability, Competitive Balance
+
+3. **Meta-Patterns List**
+   - Universal Truths (zöld badge)
+   - Counter-Intuitive Patterns (sárga badge)
+   - League-Specific Patterns (kék badge)
+
+4. **Cross-League Insights**
+   - "Premier League csapatok átlagosan 0.3 góllal többet rúgnak mint La Liga csapatok"
+   - "Bundesliga hazai előnye 15%-kal erősebb mint Serie A-ban"
+
+#### 7.9 `LeagueComparisonRadarChart` Komponens
+\`\`\`typescript
+<ResponsiveContainer width="100%" height={400}>
+  <RadarChart data={leagueData}>
+    <PolarGrid />
+    <PolarAngleAxis dataKey="metric" />
+    <PolarRadiusAxis angle={90} domain={[0, 100]} />
+    <Radar name="Premier League" dataKey="premier_league" stroke="#8884d8" fill="#8884d8" fillOpacity={0.6} />
+    <Radar name="La Liga" dataKey="la_liga" stroke="#82ca9d" fill="#82ca9d" fillOpacity={0.6} />
+    <Radar name="Bundesliga" dataKey="bundesliga" stroke="#ffc658" fill="#ffc658" fillOpacity={0.6} />
+    <Legend />
+  </RadarChart>
+</ResponsiveContainer>
+\`\`\`
+
+#### 7.10 `CorrelationHeatmap` Komponens
+\`\`\`typescript
+// Heatmap megjelenítés (Recharts vagy custom SVG)
+<div className="grid grid-cols-5 gap-1">
+  {correlationMatrix.map((row, i) => (
+    row.map((cell, j) => (
+      <div
+        key={`${i}-${j}`}
+        className={`p-4 rounded ${getColorForCorrelation(cell.value)}`}
+        title={`${cell.league_a} vs ${cell.league_b}: ${cell.value}`}
+      >
+        {cell.value.toFixed(2)}
+      </div>
+    ))
+  ))}
+</div>
+
+function getColorForCorrelation(value: number): string {
+  if (value > 0.7) return 'bg-green-500';
+  if (value > 0.4) return 'bg-yellow-500';
+  if (value > 0.0) return 'bg-orange-500';
+  return 'bg-red-500';
+}
+\`\`\`
+
+### 🧠 Cross-League Analysis Algoritmusok
+
+#### 7.11 Correlation Analysis
+\`\`\`typescript
+async function analyzeCrossLeagueCorrelation(
+  leagueAId: string,
+  leagueBId: string,
+  metric: string
+): Promise<Correlation> {
+  // Lekéri mindkét liga csapatainak adatait
+  const leagueAData = await getLeagueMetrics(leagueAId, metric);
+  const leagueBData = await getLeagueMetrics(leagueBId, metric);
+  
+  // Pearson correlation coefficient számítás
+  const correlation = calculatePearsonCorrelation(leagueAData, leagueBData);
+  
+  // Statistical significance (p-value)
+  const pValue = calculatePValue(correlation, leagueAData.length);
+  
+  // Correlation strength classification
+  const strength = classifyCorrelationStrength(correlation);
+  
+  // Insight generation
+  const insight = generateCorrelationInsight(leagueAId, leagueBId, metric, correlation);
+  
+  return {
+    correlation_coefficient: correlation,
+    p_value: pValue,
+    correlation_strength: strength,
+    insight_summary: insight,
+    sample_size: leagueAData.length
+  };
+}
+
+function calculatePearsonCorrelation(dataA: number[], dataB: number[]): number {
+  const n = dataA.length;
+  const sumA = dataA.reduce((a, b) => a + b, 0);
+  const sumB = dataB.reduce((a, b) => a + b, 0);
+  const sumAB = dataA.reduce((sum, a, i) => sum + a * dataB[i], 0);
+  const sumA2 = dataA.reduce((sum, a) => sum + a * a, 0);
+  const sumB2 = dataB.reduce((sum, b) => sum + b * b, 0);
+  
+  const numerator = n * sumAB - sumA * sumB;
+  const denominator = Math.sqrt((n * sumA2 - sumA * sumA) * (n * sumB2 - sumB * sumB));
+  
+  return numerator / denominator;
+}
+
+function classifyCorrelationStrength(r: number): string {
+  const absR = Math.abs(r);
+  if (absR >= 0.7) return 'strong';
+  if (absR >= 0.4) return 'moderate';
+  if (absR >= 0.2) return 'weak';
+  return 'none';
+}
+\`\`\`
+
+#### 7.12 Meta-Pattern Discovery
+\`\`\`typescript
+async function discoverMetaPatterns(
+  minLeagues: number = 3,
+  minEvidenceStrength: number = 0.70
+): Promise<MetaPattern[]> {
+  const allLeagues = await getAllLeagues();
+  const discoveredPatterns: MetaPattern[] = [];
+  
+  // Pattern 1: Form Always Wins
+  const formPattern = await analyzeFormImpact(allLeagues);
+  if (formPattern.supporting_leagues.length >= minLeagues && 
+      formPattern.evidence_strength >= minEvidenceStrength) {
+    discoveredPatterns.push(formPattern);
+  }
+  
+  // Pattern 2: Home Advantage Decay
+  const homeAdvantagePattern = await analyzeHomeAdvantageTrend(allLeagues);
+  if (homeAdvantagePattern.supporting_leagues.length >= minLeagues && 
+      homeAdvantagePattern.evidence_strength >= minEvidenceStrength) {
+    discoveredPatterns.push(homeAdvantagePattern);
+  }
+  
+  // Pattern 3: Derby Unpredictability
+  const derbyPattern = await analyzeDerbyMatches(allLeagues);
+  if (derbyPattern.supporting_leagues.length >= minLeagues && 
+      derbyPattern.evidence_strength >= minEvidenceStrength) {
+    discoveredPatterns.push(derbyPattern);
+  }
+  
+  // Pattern 4: Underdog Surge (Late Season)
+  const underdogPattern = await analyzeUnderdogPerformance(allLeagues);
+  if (underdogPattern.supporting_leagues.length >= minLeagues && 
+      underdogPattern.evidence_strength >= minEvidenceStrength) {
+    discoveredPatterns.push(underdogPattern);
+  }
+  
+  return discoveredPatterns;
+}
+
+async function analyzeFormImpact(leagues: League[]): Promise<MetaPattern> {
+  const supportingLeagues: string[] = [];
+  let totalEvidenceStrength = 0;
+  
+  for (const league of leagues) {
+    // Összehasonlítja a form-based predictions vs historical-based predictions accuracy-jét
+    const formAccuracy = await getFormBasedAccuracy(league.id);
+    const historicalAccuracy = await getHistoricalBasedAccuracy(league.id);
+    
+    if (formAccuracy > historicalAccuracy + 0.05) {
+      supportingLeagues.push(league.name);
+      totalEvidenceStrength += (formAccuracy - historicalAccuracy);
+    }
+  }
+  
+  return {
+    pattern_name: 'Form Always Wins',
+    pattern_type: 'universal_truth',
+    description: 'Csapat jelenlegi formája erősebb prediktor mint a történelmi teljesítmény',
+    supporting_leagues: supportingLeagues,
+    evidence_strength: totalEvidenceStrength / supportingLeagues.length,
+    prediction_impact: 0.15,
+    accuracy_improvement: 0.08
+  };
+}
+\`\`\`
+
+### 🔄 Adatfolyamat
+
+\`\`\`
+┌─────────────────────────────────────────────────────────────┐
+│   Scheduled Job: analyze-cross-league (Weekly)              │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Liga Karakterisztikák Számítása                     │
+│  - Minden ligára: avg goals, home advantage, etc.          │
+│  - Mentés league_characteristics táblába                   │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Liga-Liga Korrelációk Számítása                     │
+│  - Minden liga párosra: Pearson correlation                │
+│  - Metrics: scoring, home advantage, predictability        │
+│  - Mentés cross_league_correlations táblába                │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Meta-Minták Felfedezése                             │
+│  - Univerzális minták keresése (3+ ligában)                │
+│  - Statisztikai validáció (p-value < 0.05)                 │
+│  - Mentés meta_patterns táblába                            │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Predikciók Finomhangolása                           │
+│  - Meta-minták alkalmazása új predikciókra                 │
+│  - Cross-league insights integrálása                       │
+│  - Accuracy javulás mérése                                  │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Frontend Dashboard Frissítése                       │
+│  - Cross-League Comparison Charts                          │
+│  - Meta-Patterns List                                       │
+│  - Correlation Heatmap                                      │
+└─────────────────────────────────────────────────────────────┘
+\`\`\`
+
+---
+
+## 📊 Fázis 8: Monitoring & Visualization
+
+### 🎯 Cél
+Rendszer health monitoring, performance tracking, és interaktív computation map dashboard.
+
+### 🗄️ Database Komponensek
+
+#### 8.1 `system_health` Tábla
+\`\`\`sql
+CREATE TABLE system_health (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  component_name TEXT NOT NULL,
+  component_type TEXT NOT NULL, -- 'api_endpoint', 'edge_function', 'database_query', 'scheduled_job'
+  
+  -- Health Metrics
+  status TEXT NOT NULL, -- 'healthy', 'degraded', 'down', 'unknown'
+  response_time_ms INTEGER,
+  error_rate DECIMAL(5,4), -- 0.0000 - 1.0000
+  success_rate DECIMAL(5,4),
+  
+  -- Resource Usage
+  cpu_usage DECIMAL(5,2), -- Percentage
+  memory_usage DECIMAL(5,2), -- Percentage
+  cache_hit_rate DECIMAL(5,4),
+  
+  -- Throughput
+  requests_per_minute INTEGER,
+  avg_response_time_ms INTEGER,
+  p50_response_time_ms INTEGER,
+  p95_response_time_ms INTEGER,
+  p99_response_time_ms INTEGER,
+  
+  -- Errors
+  error_count INTEGER DEFAULT 0,
+  last_error_message TEXT,
+  last_error_at TIMESTAMPTZ,
+  
+  -- Metadata
+  checked_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Indexek
+CREATE INDEX idx_system_health_component ON system_health(component_name);
+CREATE INDEX idx_system_health_status ON system_health(status);
+CREATE INDEX idx_system_health_checked_at ON system_health(checked_at DESC);
+
+-- Retention: 7 napnál régebbi health check-ek törlése
+CREATE OR REPLACE FUNCTION cleanup_old_health_checks()
+RETURNS void AS $$
+BEGIN
+  DELETE FROM system_health WHERE checked_at < now() - INTERVAL '7 days';
+END;
+$$ LANGUAGE plpgsql;
