@@ -4,12 +4,48 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
-import { ArrowLeft, TrendingUp, Users, Target, Shield, Activity, Loader2, TrendingDown } from "lucide-react";
+import { ArrowLeft, TrendingUp, Users, Target, Shield, Activity, TrendingDown, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import StatCard from "@/components/StatCard";
 import type { TeamStatistics, League } from "@/types/database";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { EmptyStatePlaceholder } from "@/components/EmptyStatePlaceholder";
+import { TeamStatsSummary } from "@/components/TeamStatsSummary";
+
+// Helper function to generate TeamStatsSummary props from Supabase data
+const generateTeamSummaryProps = (teamName: string, teamStats: TeamStatistics) => {
+  const wins = teamStats.matches.filter(m => 
+    (m.home_team === teamName && m.full_time_home_goals > m.full_time_away_goals) ||
+    (m.away_team === teamName && m.full_time_away_goals > m.full_time_home_goals)
+  ).length;
+
+  const draws = teamStats.matches.filter(m => 
+    m.full_time_home_goals === m.full_time_away_goals
+  ).length;
+
+  const losses = teamStats.matches.length - wins - draws;
+
+  // Generate form string (last 5 matches)
+  const lastFiveMatches = teamStats.matches.slice(-5);
+  const form = lastFiveMatches.map(m => {
+    const isHome = m.home_team === teamName;
+    const won = isHome ? m.full_time_home_goals > m.full_time_away_goals : m.full_time_away_goals > m.full_time_home_goals;
+    const draw = m.full_time_home_goals === m.full_time_away_goals;
+    return won ? "W" : draw ? "D" : "L";
+  }).join("");
+
+  return {
+    teamName,
+    totalMatches: teamStats.matches.length,
+    wins,
+    draws,
+    losses,
+    form: form || "N/A",
+    averageGoals: teamStats.team_analysis.average_goals.average_total_goals,
+    cssScore: teamStats.prediction.confidence * 10, // Convert 0-1 to 0-10
+  };
+};
 
 const TeamDetail = () => {
   const { teamName } = useParams<{ teamName: string }>();
@@ -61,9 +97,7 @@ const TeamDetail = () => {
         <TopBar />
         <main className="ml-0 md:ml-[84px] py-10 sm:py-14">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            </div>
+            <LoadingSpinner size="lg" text="Csapat statisztikák betöltése..." />
           </div>
         </main>
       </div>
@@ -81,11 +115,14 @@ const TeamDetail = () => {
               <ArrowLeft className="w-4 h-4 mr-2" />
               Vissza
             </Button>
-            <Alert variant="destructive">
-              <AlertDescription>
-                Hiba történt: {error.message}
-              </AlertDescription>
-            </Alert>
+            <EmptyStatePlaceholder
+              icon={<BarChart3 className="w-12 h-12" />}
+              title="Hiba történt"
+              description={`Hiba történt a statisztikák betöltése közben: ${error.message}`}
+              actionLabel="Vissza a csapatokhoz"
+              onAction={() => navigate("/teams")}
+              variant="default"
+            />
           </div>
         </main>
       </div>
@@ -103,11 +140,14 @@ const TeamDetail = () => {
               <ArrowLeft className="w-4 h-4 mr-2" />
               Vissza
             </Button>
-            <Alert>
-              <AlertDescription>
-                Ehhez a csapathoz még nincsenek statisztikák. Tölts fel mérkőzés adatokat!
-              </AlertDescription>
-            </Alert>
+            <EmptyStatePlaceholder
+              icon={<BarChart3 className="w-12 h-12" />}
+              title="Nincsenek statisztikák"
+              description="Ehhez a csapathoz még nincsenek statisztikák. Tölts fel mérkőzés adatokat a Vezérlőpult segítségével!"
+              actionLabel="Vezérlőpult megnyitása"
+              onAction={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              variant="default"
+            />
           </div>
         </main>
       </div>
@@ -149,6 +189,11 @@ const TeamDetail = () => {
                 </select>
               </div>
             )}
+          </div>
+
+          {/* NEW: TeamStatsSummary Hero Card */}
+          <div className="mb-6">
+            <TeamStatsSummary {...generateTeamSummaryProps(decodedTeamName, teamStats)} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

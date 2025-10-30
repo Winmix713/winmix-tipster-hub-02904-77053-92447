@@ -3,9 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
-import { Trophy, Loader2 } from "lucide-react";
+import { Trophy, Calendar } from "lucide-react";
 import type { League } from "@/types/database";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { EmptyStatePlaceholder } from "@/components/EmptyStatePlaceholder";
 
 const Leagues = () => {
   const [leagueType, setLeagueType] = useState<"angol" | "spanyol">("angol");
@@ -115,25 +116,25 @@ const Leagues = () => {
           </div>
 
           {leaguesLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            </div>
+            <LoadingSpinner size="lg" text="Bajnokságok betöltése..." />
           ) : !leagues || leagues.length === 0 ? (
-            <Alert>
-              <AlertDescription>
-                Ehhez a bajnoksághoz még nincsenek feltöltött szezónok. Tölts fel mérkőzés adatokat a Vezérlőpult oldalon!
-              </AlertDescription>
-            </Alert>
+            <EmptyStatePlaceholder
+              icon={<Calendar className="w-12 h-12" />}
+              title="Még nincsenek feltöltött szezónok"
+              description="Ehhez a bajnoksághoz még nincsenek feltöltött szezónok. Tölts fel mérkőzés adatokat a Vezérlőpult oldalon!"
+              actionLabel="Vezérlőpult megnyitása"
+              onAction={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              variant="default"
+            />
           ) : matchesLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            </div>
+            <LoadingSpinner size="lg" text="Mérkőzések betöltése..." />
           ) : standings.length === 0 ? (
-            <Alert>
-              <AlertDescription>
-                Nincsenek mérkőzések ebben a szezonban.
-              </AlertDescription>
-            </Alert>
+            <EmptyStatePlaceholder
+              icon={<Calendar className="w-12 h-12" />}
+              title="Nincsenek mérkőzések ebben a szezonban"
+              description="Válassz másik szezont vagy tölts fel újabb mérkőzés adatokat!"
+              variant="minimal"
+            />
           ) : (
 
             <div className="rounded-2xl bg-card ring-1 ring-border overflow-hidden">

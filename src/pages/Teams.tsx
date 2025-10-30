@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import Sidebar from "@/components/Sidebar";
 import TopBar from "@/components/TopBar";
-import { Users, Loader2 } from "lucide-react";
+import { Users } from "lucide-react";
 import type { League } from "@/types/database";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
+import { EmptyStatePlaceholder } from "@/components/EmptyStatePlaceholder";
 
 const Teams = () => {
   const [selectedLeagueId, setSelectedLeagueId] = useState<string | null>(null);
@@ -66,9 +68,7 @@ const Teams = () => {
         <TopBar />
         <main className="ml-0 md:ml-[84px] py-10 sm:py-14">
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            </div>
+            <LoadingSpinner size="lg" text="Csapatok betöltése..." />
           </div>
         </main>
       </div>
@@ -131,9 +131,14 @@ const Teams = () => {
               ))}
             </div>
           ) : (
-            <div className="text-center py-12 text-muted-foreground">
-              Nincsenek elérhető csapatok. Tölts fel mérkőzés adatokat!
-            </div>
+            <EmptyStatePlaceholder
+              icon={<Users className="w-12 h-12" />}
+              title="Még nincsenek csapatok ebben a bajnokságban"
+              description="Tölts fel mérkőzés adatokat a ControlPanel segítségével, hogy lásd a csapatokat!"
+              actionLabel="Vezérlőpult megnyitása"
+              onAction={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              variant="default"
+            />
           )}
         </div>
       </main>
