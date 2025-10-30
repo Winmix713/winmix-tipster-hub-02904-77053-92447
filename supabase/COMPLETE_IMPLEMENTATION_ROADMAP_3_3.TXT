@@ -1,0 +1,914 @@
+\`\`\`
+
+#### 8.2 `performance_metrics` Tábla
+\`\`\`sql
+CREATE TABLE performance_metrics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  metric_name TEXT NOT NULL,
+  metric_type TEXT NOT NULL, -- 'accuracy', 'latency', 'throughput', 'error_rate'
+  metric_category TEXT, -- 'prediction', 'data_quality', 'system'
+  
+  -- Metric Value
+  value DECIMAL(10,4) NOT NULL,
+  unit TEXT, -- 'percentage', 'milliseconds', 'count', 'rate'
+  
+  -- Context
+  component_name TEXT,
+  league_id UUID REFERENCES leagues(id),
+  model_version TEXT,
+  
+  -- Aggregation
+  aggregation_period TEXT, -- 'minute', 'hour', 'day', 'week'
+  period_start TIMESTAMPTZ NOT NULL,
+  period_end TIMESTAMPTZ NOT NULL,
+  
+  -- Metadata
+  recorded_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Indexek
+CREATE INDEX idx_perf_metrics_name ON performance_metrics(metric_name);
+CREATE INDEX idx_perf_metrics_type ON performance_metrics(metric_type);
+CREATE INDEX idx_perf_metrics_period ON performance_metrics(period_start DESC);
+CREATE INDEX idx_perf_metrics_component ON performance_metrics(component_name);
+\`\`\`
+
+#### 8.3 `computation_graph` Tábla
+\`\`\`sql
+CREATE TABLE computation_graph (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  node_id TEXT NOT NULL UNIQUE,
+  node_name TEXT NOT NULL,
+  node_type TEXT NOT NULL, -- 'data_source', 'computation', 'model', 'output'
+  
+  -- Node Details
+  description TEXT,
+  function_name TEXT,
+  execution_time_ms INTEGER,
+  
+  -- Dependencies
+  depends_on TEXT[], -- Array of node_ids
+  triggers TEXT[], -- Array of node_ids that this node triggers
+  
+  -- Status
+  status TEXT DEFAULT 'active', -- 'active', 'disabled', 'deprecated'
+  last_executed_at TIMESTAMPTZ,
+  
+  -- Visualization
+  position_x INTEGER,
+  position_y INTEGER,
+  color TEXT,
+  icon TEXT,
+  
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Computation graph nodes
+INSERT INTO computation_graph (node_id, node_name, node_type, depends_on, triggers) VALUES
+('csv_upload', 'CSV Upload', 'data_source', ARRAY[]::TEXT[], ARRAY['data_validation', 'match_processing']),
+('data_validation', 'Data Validation', 'computation', ARRAY['csv_upload'], ARRAY['data_quality_scoring']),
+('match_processing', 'Match Processing', 'computation', ARRAY['csv_upload'], ARRAY['team_stats_calc']),
+('team_stats_calc', 'Team Stats Calculation', 'computation', ARRAY['match_processing'], ARRAY['css_scoring', 'pattern_detection']),
+('css_scoring', 'CSS Scoring', 'computation', ARRAY['team_stats_calc', 'data_quality_scoring'], ARRAY['prediction_model']),
+('pattern_detection', 'Pattern Detection', 'computation', ARRAY['team_stats_calc'], ARRAY['prediction_model']),
+('prediction_model', 'Prediction Model', 'model', ARRAY['css_scoring', 'pattern_detection'], ARRAY['narrative_generation', 'prediction_output']),
+('narrative_generation', 'Narrative Generation', 'computation', ARRAY['prediction_model'], ARRAY['prediction_output']),
+('prediction_output', 'Prediction Output', 'output', ARRAY['prediction_model', 'narrative_generation'], ARRAY[]::TEXT[]);
+\`\`\`
+
+### 🔧 API Endpoints
+
+#### 8.4 `/api/monitoring/health` - System Health Check
+**Method:** GET  
+**Response:**
+\`\`\`typescript
+{
+  overall_status: 'healthy' | 'degraded' | 'down';
+  components: Array<{
+    component_name: string;
+    component_type: string;
+    status: string;
+    response_time_ms: number;
+    error_rate: number;
+    last_checked: string;
+  }>;
+  summary: {
+    healthy_count: number;
+    degraded_count: number;
+    down_count: number;
+  };
+}
+\`\`\`
+
+#### 8.5 `/api/monitoring/metrics` - Performance Metrics
+**Method:** GET  
+**Query Params:** `?metric=accuracy&period=day&start=2024-01-01&end=2024-01-31`  
+**Response:**
+\`\`\`typescript
+{
+  metric_name: string;
+  metric_type: string;
+  data_points: Array<{
+    timestamp: string;
+    value: number;
+    unit: string;
+  }>;
+  aggregation: {
+    avg: number;
+    min: number;
+    max: number;
+    p50: number;
+    p95: number;
+    p99: number;
+  };
+}
+\`\`\`
+
+#### 8.6 `/api/monitoring/computation-graph` - Computation Graph
+**Method:** GET  
+**Response:**
+\`\`\`typescript
+{
+  nodes: Array<{
+    id: string;
+    name: string;
+    type: 'data_source' | 'computation' | 'model' | 'output';
+    status: 'active' | 'disabled' | 'deprecated';
+    execution_time_ms: number;
+    position: { x: number; y: number };
+  }>;
+  edges: Array<{
+    source: string;
+    target: string;
+    type: 'dependency' | 'trigger';
+  }>;
+}
+\`\`\`
+
+#### 8.7 `/api/monitoring/alerts` - System Alerts
+**Method:** GET  
+**Response:**
+\`\`\`typescript
+{
+  active_alerts: Array<{
+    alert_id: string;
+    severity: 'critical' | 'warning' | 'info';
+    component_name: string;
+    message: string;
+    triggered_at: string;
+    acknowledged: boolean;
+  }>;
+  total_active: number;
+}
+\`\`\`
+
+### 🎨 Frontend Komponensek
+
+#### 8.8 `/app/monitoring/page.tsx` - Monitoring Dashboard
+**Új oldal létrehozása**
+
+**Szekciók:**
+1. **System Health Overview**
+   - Overall status badge (🟢 Healthy, 🟡 Degraded, 🔴 Down)
+   - Component status grid
+   - Active alerts banner
+
+2. **Performance Metrics Charts**
+   - Line chart: Accuracy over time
+   - Line chart: Response time (p50, p95, p99)
+   - Bar chart: Error rate by component
+   - Pie chart: Cache hit rate
+
+3. **Computation Map (React Flow)**
+   - Interactive node graph
+   - Color-coded nodes (green = healthy, yellow = slow, red = error)
+   - Click node → detailed metrics modal
+   - Hover edge → dependency info
+
+4. **Real-Time Metrics**
+   - Live updating metrics (SWR polling 5 sec)
+   - Requests per minute
+   - Active users
+   - Database connections
+
+#### 8.9 `ComputationMapDashboard` Komponens
+\`\`\`typescript
+import ReactFlow, { Node, Edge, Background, Controls } from 'reactflow';
+import 'reactflow/dist/style.css';
+
+export function ComputationMapDashboard() {
+  const [nodes, setNodes] = useState<Node[]>([]);
+  const [edges, setEdges] = useState<Edge[]>([]);
+  
+  useEffect(() => {
+    async function loadGraph() {
+      const response = await fetch('/api/monitoring/computation-graph');
+      const data = await response.json();
+      
+      setNodes(data.nodes.map(node => ({
+        id: node.id,
+        type: 'custom',
+        position: node.position,
+        data: {
+          label: node.name,
+          status: node.status,
+          execution_time: node.execution_time_ms
+        }
+      })));
+      
+      setEdges(data.edges.map(edge => ({
+        id: `${edge.source}-${edge.target}`,
+        source: edge.source,
+        target: edge.target,
+        animated: edge.type === 'trigger'
+      })));
+    }
+    
+    loadGraph();
+  }, []);
+  
+  return (
+    <div className="h-[600px] w-full">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        fitView
+      >
+        <Background />
+        <Controls />
+      </ReactFlow>
+    </div>
+  );
+}
+\`\`\`
+
+#### 8.10 `SystemHealthCard` Komponens
+\`\`\`typescript
+<Card>
+  <CardHeader>
+    <div className="flex items-center justify-between">
+      <CardTitle>System Health</CardTitle>
+      <Badge variant={getStatusVariant(overallStatus)}>
+        {getStatusIcon(overallStatus)} {overallStatus}
+      </Badge>
+    </div>
+  </CardHeader>
+  <CardContent>
+    <div className="grid grid-cols-3 gap-4">
+      {components.map(component => (
+        <div key={component.name} className="flex items-center gap-2">
+          <div className={`w-3 h-3 rounded-full ${getStatusColor(component.status)}`} />
+          <span className="text-sm">{component.name}</span>
+          <span className="text-xs text-muted-foreground">{component.response_time_ms}ms</span>
+        </div>
+      ))}
+    </div>
+  </CardContent>
+</Card>
+\`\`\`
+
+#### 8.11 `PerformanceMetricsChart` Komponens
+\`\`\`typescript
+<ResponsiveContainer width="100%" height={300}>
+  <LineChart data={metricsData}>
+    <CartesianGrid strokeDasharray="3 3" />
+    <XAxis dataKey="timestamp" />
+    <YAxis />
+    <Tooltip />
+    <Legend />
+    <Line type="monotone" dataKey="p50" stroke="#8884d8" name="P50" />
+    <Line type="monotone" dataKey="p95" stroke="#82ca9d" name="P95" />
+    <Line type="monotone" dataKey="p99" stroke="#ffc658" name="P99" />
+  </LineChart>
+</ResponsiveContainer>
+\`\`\`
+
+### 🔄 Adatfolyamat
+
+\`\`\`
+┌─────────────────────────────────────────────────────────────┐
+│   Scheduled Job: health-monitor (Every 1 minute)            │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Minden Komponens Health Check                       │
+│  - API endpoints ping                                       │
+│  - Edge functions status                                    │
+│  - Database query performance                               │
+│  - Scheduled jobs last run                                  │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Metrics Számítás                                    │
+│  - Response time (p50, p95, p99)                           │
+│  - Error rate                                               │
+│  - Success rate                                             │
+│  - Cache hit rate                                           │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Mentés system_health Táblába                        │
+│  - Component status                                         │
+│  - Performance metrics                                      │
+│  - Error details                                            │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Alert Triggering (Ha Szükséges)                     │
+│  - Error rate > 5% → Warning                               │
+│  - Response time > 5s → Warning                            │
+│  - Component down → Critical                                │
+│  - Email/Slack notification                                 │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│         Frontend Dashboard Frissítése                       │
+│  - Real-time metrics (SWR polling 5 sec)                   │
+│  - Computation map color update                            │
+│  - Alert banner megjelenítés                               │
+└─────────────────────────────────────────────────────────────┘
+\`\`\`
+
+### 📊 Alerting Rules
+
+\`\`\`typescript
+// Alert configuration
+const ALERT_RULES = [
+  {
+    name: 'High Error Rate',
+    condition: (metrics) => metrics.error_rate > 0.05,
+    severity: 'warning',
+    message: 'Error rate exceeded 5%'
+  },
+  {
+    name: 'Slow Response Time',
+    condition: (metrics) => metrics.p95_response_time_ms > 5000,
+    severity: 'warning',
+    message: 'P95 response time exceeded 5 seconds'
+  },
+  {
+    name: 'Component Down',
+    condition: (health) => health.status === 'down',
+    severity: 'critical',
+    message: 'Component is down'
+  },
+  {
+    name: 'Low Cache Hit Rate',
+    condition: (metrics) => metrics.cache_hit_rate < 0.70,
+    severity: 'info',
+    message: 'Cache hit rate below 70%'
+  },
+  {
+    name: 'Prediction Accuracy Drop',
+    condition: (metrics) => metrics.accuracy < 0.60,
+    severity: 'warning',
+    message: 'Prediction accuracy dropped below 60%'
+  }
+];
+
+async function checkAlerts() {
+  const health = await getSystemHealth();
+  const metrics = await getPerformanceMetrics();
+  
+  for (const rule of ALERT_RULES) {
+    if (rule.condition(health) || rule.condition(metrics)) {
+      await triggerAlert({
+        rule_name: rule.name,
+        severity: rule.severity,
+        message: rule.message,
+        component: health.component_name,
+        metrics: metrics
+      });
+    }
+  }
+}
+\`\`\`
+
+---
+
+## 🚀 Fázis 9: Advanced Features
+
+### 🎯 Cél
+Haladó funkciók: Collaborative Intelligence, Market Integration, Temporal Decay, Self-Improving System.
+
+### 9.1 Collaborative Intelligence
+
+**Cél:** User predikciók gyűjtése és wisdom of crowd analysis.
+
+**Database:**
+\`\`\`sql
+CREATE TABLE user_predictions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  match_id UUID REFERENCES matches(id),
+  
+  -- User Prediction
+  predicted_winner TEXT NOT NULL,
+  predicted_home_goals INTEGER,
+  predicted_away_goals INTEGER,
+  confidence DECIMAL(3,2),
+  
+  -- Actual Result
+  actual_winner TEXT,
+  was_correct BOOLEAN,
+  
+  -- Metadata
+  predicted_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE crowd_wisdom (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  match_id UUID REFERENCES matches(id),
+  
+  -- Crowd Prediction
+  crowd_predicted_winner TEXT,
+  crowd_confidence DECIMAL(3,2),
+  total_predictions INTEGER,
+  
+  -- Model Prediction
+  model_predicted_winner TEXT,
+  model_confidence DECIMAL(3,2),
+  
+  -- Divergence
+  divergence_score DECIMAL(3,2), -- How much crowd disagrees with model
+  
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+\`\`\`
+
+**API Endpoints:**
+- `POST /api/predictions/user` - User predikció mentése
+- `GET /api/predictions/crowd/{matchId}` - Crowd wisdom lekérése
+- `GET /api/predictions/divergence` - Model vs Crowd divergence
+
+**Frontend:**
+- User prediction form
+- Crowd wisdom display ("85% of users predict home win")
+- Divergence indicator ("⚠️ Model disagrees with crowd")
+
+---
+
+### 9.2 Market Integration
+
+**Cél:** Külső odds API integráció és value bet detection.
+
+**Database:**
+\`\`\`sql
+CREATE TABLE market_odds (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  match_id UUID REFERENCES matches(id),
+  bookmaker TEXT NOT NULL,
+  
+  -- Odds
+  home_win_odds DECIMAL(5,2),
+  draw_odds DECIMAL(5,2),
+  away_win_odds DECIMAL(5,2),
+  over_2_5_odds DECIMAL(5,2),
+  btts_yes_odds DECIMAL(5,2),
+  
+  -- Implied Probability
+  home_win_probability DECIMAL(5,4),
+  draw_probability DECIMAL(5,4),
+  away_win_probability DECIMAL(5,4),
+  
+  -- Metadata
+  fetched_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE value_bets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  match_id UUID REFERENCES matches(id),
+  bet_type TEXT NOT NULL, -- 'home_win', 'draw', 'away_win', 'over_2_5', 'btts'
+  
+  -- Model vs Market
+  model_probability DECIMAL(5,4),
+  market_probability DECIMAL(5,4),
+  odds DECIMAL(5,2),
+  
+  -- Value
+  expected_value DECIMAL(5,2), -- EV = (model_prob * odds) - 1
+  kelly_criterion DECIMAL(5,4), -- Optimal bet size
+  value_rating TEXT, -- 'excellent', 'good', 'fair', 'poor'
+  
+  -- Metadata
+  detected_at TIMESTAMPTZ DEFAULT now(),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+\`\`\`
+
+**API Endpoints:**
+- `GET /api/market/odds/{matchId}` - Market odds lekérése
+- `GET /api/market/value-bets` - Value bets lista
+- `POST /api/market/sync` - Odds szinkronizálás külső API-val
+
+**Frontend:**
+- Market odds display
+- Value bet highlights (🟢 Excellent value, 🟡 Good value)
+- Kelly Criterion calculator
+
+---
+
+### 9.3 Temporal Decay System
+
+**Cél:** Információ frissesség tracking és exponential decay.
+
+**Database:**
+\`\`\`sql
+CREATE TABLE information_freshness (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_name TEXT NOT NULL,
+  information_type TEXT NOT NULL, -- 'form', 'injuries', 'stats', 'patterns'
+  
+  -- Freshness
+  last_updated_at TIMESTAMPTZ NOT NULL,
+  decay_rate DECIMAL(5,4), -- Exponential decay rate (0.0001 - 0.1)
+  current_freshness DECIMAL(3,2), -- 0.00 - 1.00 (1.00 = fresh, 0.00 = stale)
+  
+  -- Thresholds
+  refresh_threshold DECIMAL(3,2) DEFAULT 0.70, -- Trigger refresh when below this
+  critical_threshold DECIMAL(3,2) DEFAULT 0.50, -- Critical staleness
+  
+  -- Metadata
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+\`\`\`
+
+**Decay Function:**
+\`\`\`typescript
+function calculateFreshness(lastUpdated: Date, decayRate: number): number {
+  const hoursSinceUpdate = (Date.now() - lastUpdated.getTime()) / (1000 * 60 * 60);
+  const freshness = Math.exp(-decayRate * hoursSinceUpdate);
+  return Math.max(0, Math.min(1, freshness));
+}
+
+// Example decay rates:
+// - Form data: 0.05 (decays quickly, ~14 hours to 50%)
+// - Season stats: 0.001 (decays slowly, ~693 hours to 50%)
+// - Injury news: 0.1 (decays very quickly, ~7 hours to 50%)
+\`\`\`
+
+**Auto-Refresh Trigger:**
+\`\`\`typescript
+async function checkAndRefreshStaleData() {
+  const staleInfo = await getStaleInformation({ threshold: 0.70 });
+  
+  for (const info of staleInfo) {
+    if (info.information_type === 'form') {
+      await refreshTeamForm(info.team_name);
+    } else if (info.information_type === 'stats') {
+      await refreshTeamStats(info.team_name);
+    } else if (info.information_type === 'patterns') {
+      await detectPatterns(info.team_name);
+    }
+  }
+}
+\`\`\`
+
+---
+
+### 9.4 Self-Improving System
+
+**Cél:** Automatikus feature engineering és continuous learning.
+
+**Database:**
+\`\`\`sql
+CREATE TABLE feature_experiments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  feature_name TEXT NOT NULL,
+  feature_type TEXT NOT NULL, -- 'engineered', 'derived', 'external'
+  
+  -- Feature Definition
+  calculation_logic TEXT,
+  dependencies TEXT[],
+  
+  -- Performance
+  baseline_accuracy DECIMAL(5,2),
+  with_feature_accuracy DECIMAL(5,2),
+  accuracy_improvement DECIMAL(5,2),
+  
+  -- Statistical Validation
+  p_value DECIMAL(5,4),
+  confidence_interval JSONB,
+  
+  -- Status
+  status TEXT DEFAULT 'testing', -- 'testing', 'approved', 'rejected', 'deprecated'
+  tested_predictions INTEGER DEFAULT 0,
+  
+  -- Metadata
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+\`\`\`
+
+**Automated Feature Engineering:**
+\`\`\`typescript
+async function generateNewFeatures() {
+  const baseFeatures = await getExistingFeatures();
+  const newFeatures: Feature[] = [];
+  
+  // 1. Polynomial features (x^2, x^3)
+  for (const feature of baseFeatures) {
+    if (feature.type === 'numeric') {
+      newFeatures.push({
+        name: `${feature.name}_squared`,
+        calculation: (data) => Math.pow(data[feature.name], 2)
+      });
+    }
+  }
+  
+  // 2. Interaction features (x * y)
+  for (let i = 0; i < baseFeatures.length; i++) {
+    for (let j = i + 1; j < baseFeatures.length; j++) {
+      newFeatures.push({
+        name: `${baseFeatures[i].name}_x_${baseFeatures[j].name}`,
+        calculation: (data) => data[baseFeatures[i].name] * data[baseFeatures[j].name]
+      });
+    }
+  }
+  
+  // 3. Ratio features (x / y)
+  newFeatures.push({
+    name: 'goals_scored_per_match',
+    calculation: (data) => data.total_goals_scored / data.matches_played
+  });
+  
+  // 4. Rolling averages (last 3, 5, 10 matches)
+  newFeatures.push({
+    name: 'rolling_avg_goals_last_5',
+    calculation: (data) => calculateRollingAverage(data.recent_goals, 5)
+  });
+  
+  // Test each new feature
+  for (const feature of newFeatures) {
+    await testFeature(feature);
+  }
+}
+
+async function testFeature(feature: Feature) {
+  // A/B test: baseline model vs model with new feature
+  const baselineAccuracy = await getBaselineAccuracy();
+  const withFeatureAccuracy = await testModelWithFeature(feature);
+  
+  const improvement = withFeatureAccuracy - baselineAccuracy;
+  const pValue = calculateStatisticalSignificance(baselineAccuracy, withFeatureAccuracy);
+  
+  if (improvement > 0.02 && pValue < 0.05) {
+    // Feature improves accuracy by 2%+ and is statistically significant
+    await approveFeature(feature);
+  } else {
+    await rejectFeature(feature);
+  }
+}
+\`\`\`
+
+**Continuous Learning Pipeline:**
+\`\`\`typescript
+// Scheduled Job: continuous-learning (Weekly)
+async function continuousLearning() {
+  // 1. Generate new features
+  await generateNewFeatures();
+  
+  // 2. Test new features
+  const newFeatures = await getTestingFeatures();
+  for (const feature of newFeatures) {
+    await testFeature(feature);
+  }
+  
+  // 3. Prune underperforming features
+  await pruneUnderperformingFeatures({ threshold: 0.50 });
+  
+  // 4. Retrain model with approved features
+  await retrainModel({ includeNewFeatures: true });
+  
+  // 5. Deploy new model as challenger
+  await deployAsChallenger({ modelVersion: 'auto-generated-v1.x' });
+}
+\`\`\`
+
+---
+
+## 📊 Architektúra Diagramok
+
+### Teljes Rendszer Architektúra
+
+\`\`\`
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           Frontend (Next.js)                            │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
+│  │ Teams    │  │ Matches  │  │ Analytics│  │ Jobs     │  │ Monitoring│ │
+│  │ Page     │  │ Page     │  │ Dashboard│  │ Page     │  │ Dashboard │ │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        API Layer (Next.js API Routes)                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
+│  │ Jobs     │  │ Predictions│ │ Models   │  │ Patterns │  │ Monitoring│ │
+│  │ API      │  │ API       │  │ API      │  │ API      │  │ API       │ │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Business Logic Layer                               │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
+│  │ CSS      │  │ Narrative│  │ Pattern  │  │ Model    │  │ Data     │ │
+│  │ Calculator│ │ Generator│  │ Detector │  │ Selector │  │ Quality  │ │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Supabase (PostgreSQL)                              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
+│  │ leagues  │  │ matches  │  │ predictions│ │ patterns │  │ jobs     │ │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
+│  │ model_   │  │ system_  │  │ performance│ │ meta_    │  │ user_    │ │
+│  │ registry │  │ health   │  │ _metrics  │  │ patterns │  │ predictions│
+│  └──────────┘  └──────────┘  └──────────┘  └���─────────┘  └──────────┘ │
+└────────────────────────────┬────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      Scheduled Jobs (Vercel Cron)                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐ │
+│  │ Calculate│  │ Detect   │  │ Evaluate │  │ Health   │  │ Auto     │ │
+│  │ Stats    │  │ Patterns │  │ Models   │  │ Monitor  │  │ Promote  │ │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
+\`\`\`
+
+---
+
+## 🛠️ Technológiai Stack
+
+### Backend
+- **Framework:** Next.js 16 (App Router)
+- **Database:** Supabase (PostgreSQL)
+- **ORM:** Direct SQL queries (no ORM)
+- **Caching:** SWR (client-side), Supabase caching (server-side)
+- **Scheduled Jobs:** Vercel Cron
+- **API:** Next.js API Routes
+
+### Frontend
+- **Framework:** React 19.2
+- **UI Library:** shadcn/ui
+- **Styling:** Tailwind CSS v4
+- **Charts:** Recharts
+- **Flow Diagrams:** React Flow
+- **State Management:** React Context + SWR
+- **Forms:** React Hook Form + Zod
+
+### DevOps
+- **Hosting:** Vercel
+- **CI/CD:** Vercel Git Integration
+- **Monitoring:** Custom monitoring dashboard
+- **Alerting:** Email/Slack notifications
+
+### External Integrations (Optional)
+- **Odds API:** Odds API, The Odds API
+- **Weather API:** OpenWeatherMap
+- **News API:** NewsAPI
+
+---
+
+## 📅 Implementációs Ütemterv
+
+### Hét 1-2: Fázis 4 - Feedback Loop
+- **Hét 1:**
+  - Database táblák (predictions, model_performance)
+  - API endpoints (track, update-results, performance)
+  - Scheduled job: evaluate-models
+- **Hét 2:**
+  - Analytics dashboard frontend
+  - Charts és visualizations
+  - Auto-pruning logic
+
+### Hét 3: Fázis 5 - Pattern Detection
+- Pattern definitions tábla
+- Detection algoritmusok (streak, dominance, scoring)
+- Frontend: TeamPatternsSection komponens
+- Scheduled job: detect-patterns
+
+### Hét 4-5: Fázis 6 - Champion/Challenger
+- **Hét 4:**
+  - Model registry tábla
+  - Epsilon-greedy selection
+  - Shadow mode implementation
+- **Hét 5:**
+  - Model comparison logic
+  - Auto-promotion logic
+  - Models dashboard frontend
+
+### Hét 6-8: Fázis 7 - Cross-League Intelligence
+- **Hét 6:**
+  - Cross-league correlations tábla
+  - Correlation analysis algoritmusok
+- **Hét 7:**
+  - Meta-patterns discovery
+  - League characteristics calculation
+- **Hét 8:**
+  - Cross-league dashboard frontend
+  - Radar charts, heatmaps
+
+### Hét 9-10: Fázis 8 - Monitoring
+- **Hét 9:**
+  - System health tábla
+  - Health check scheduled job
+  - Performance metrics collection
+- **Hét 10:**
+  - Monitoring dashboard frontend
+  - Computation map (React Flow)
+  - Alerting system
+
+### Hét 11-14: Fázis 9 - Advanced Features
+- **Hét 11:** Collaborative Intelligence
+- **Hét 12:** Market Integration
+- **Hét 13:** Temporal Decay System
+- **Hét 14:** Self-Improving System
+
+---
+
+## 🎯 Összefoglalás
+
+### Teljes Rendszer Komponensek Száma
+
+**Database Táblák:** 15+
+- scheduled_jobs, job_execution_logs
+- predictions, model_performance, model_comparison
+- team_patterns, pattern_definitions
+- model_registry, model_experiments
+- cross_league_correlations, meta_patterns, league_characteristics
+- system_health, performance_metrics, computation_graph
+- user_predictions, crowd_wisdom, market_odds, value_bets, information_freshness, feature_experiments
+
+**API Endpoints:** 30+
+- Jobs: list, logs, trigger, toggle, scheduler
+- Predictions: track, update-results, performance, compare
+- Models: register, select, shadow-run, promote
+- Experiments: create, evaluate
+- Patterns: detect, team, verify
+- Cross-League: correlations, analyze, discover, apply
+- Monitoring: health, metrics, computation-graph, alerts
+- Market: odds, value-bets, sync
+- Features: generate, test, approve
+
+**Frontend Pages:** 8+
+- /jobs - Scheduled Jobs Management
+- /analytics - Model Performance Dashboard
+- /models - Model Management & Comparison
+- /cross-league - Cross-League Intelligence
+- /monitoring - System Health & Monitoring
+- /market - Market Odds & Value Bets (optional)
+- /experiments - Feature Experiments (optional)
+
+**Scheduled Jobs:** 10+
+- calculate-all-team-stats (6 óránként)
+- validate-data-quality (naponta)
+- detect-patterns (naponta)
+- evaluate-models (naponta)
+- auto-promote-models (hetente)
+- analyze-cross-league (hetente)
+- discover-meta-patterns (hetente)
+- health-monitor (percenként)
+- continuous-learning (hetente)
+- cleanup-old-logs (naponta)
+
+**Komponensek:** 50+
+- ScheduledJobsPanel, JobStatusCard
+- ModelPerformanceChart, ModelCard
+- TeamPatternsSection, PatternBadge
+- ComputationMapDashboard, SystemHealthCard
+- LeagueComparisonRadarChart, CorrelationHeatmap
+- ValueBetCard, MarketOddsDisplay
+- ... és még sok más
+
+---
+
+## 🚀 Következő Lépések
+
+1. **Fázis 4 Indítása:** Feedback Loop implementálása
+2. **Database Migrációk:** SQL script-ek futtatása
+3. **API Endpoints:** Predictions tracking és model evaluation
+4. **Frontend:** Analytics dashboard létrehozása
+5. **Tesztelés:** Minden új funkció alapos tesztelése
+6. **Dokumentáció:** API dokumentáció frissítése
+7. **Monitoring:** System health tracking beállítása
+
+---
+
+**Készítette:** v0 AI Assistant  
+**Utolsó frissítés:** 2024-10-30  
+**Verzió:** 1.0.0
