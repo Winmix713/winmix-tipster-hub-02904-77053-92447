@@ -107,7 +107,7 @@ const HeroSection = () => {
               </div>
             </div>
 
-            {/* Bottom team form cards */}
+            {/* Bottom team form cards - staggered animation */}
             <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {[
                 { name: "Manchester City", logo: manCityLogo, form: ["W", "W", "W", "D", "W"], points: 28 },
@@ -115,11 +115,15 @@ const HeroSection = () => {
                 { name: "Liverpool", logo: liverpoolLogo, form: ["W", "D", "W", "W", "L"], points: 25 },
                 { name: "Aston Villa", logo: villaLogo, form: ["L", "W", "W", "D", "W"], points: 24 }
               ].map((team, i) => (
-                <div key={i} className="rounded-2xl bg-card ring-1 ring-border px-3 py-3 flex items-center gap-3">
+                <div 
+                  key={i} 
+                  className="rounded-2xl glass-card ring-1 ring-border px-3 py-3 flex items-center gap-3 hover:bg-white/10 hover:scale-105 transition-all duration-300 card-hover-lift animate-slide-in-bottom"
+                  style={{ animationDelay: `${i * 0.1}s` }}
+                >
                   <img 
                     src={team.logo} 
                     alt={`${team.name} logo`} 
-                    className="h-10 w-10 rounded-full ring-1 ring-border object-cover bg-background p-1"
+                    className="h-10 w-10 rounded-full ring-1 ring-border object-cover bg-background p-1 transition-transform group-hover:scale-110"
                   />
                   <div className="flex-1">
                     <div className="text-sm text-foreground tracking-tight font-semibold">{team.name}</div>
@@ -127,7 +131,7 @@ const HeroSection = () => {
                       {team.form.map((result, idx) => (
                         <span 
                           key={idx} 
-                          className={`h-1.5 w-1.5 rounded-full ${
+                          className={`h-1.5 w-1.5 rounded-full transition-all ${
                             result === "W" ? "bg-primary" : 
                             result === "D" ? "bg-secondary" : 
                             "bg-destructive"

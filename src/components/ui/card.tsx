@@ -3,9 +3,37 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
-  <div ref={ref} className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)} {...props} />
+  <div ref={ref} className={cn("rounded-2xl border bg-card text-card-foreground shadow-sm", className)} {...props} />
 ));
 Card.displayName = "Card";
+
+const CardGlass = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
+  <div ref={ref} className={cn("rounded-2xl glass-card text-card-foreground shadow-sm", className)} {...props} />
+));
+CardGlass.displayName = "CardGlass";
+
+const CardGlassHover = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
+  <div ref={ref} className={cn("rounded-2xl glass-card-hover card-hover-lift text-card-foreground", className)} {...props} />
+));
+CardGlassHover.displayName = "CardGlassHover";
+
+const CardGlassAccent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & { accentColor?: string }>(
+  ({ className, accentColor = "primary", ...props }, ref) => (
+    <div 
+      ref={ref} 
+      className={cn(
+        "rounded-2xl glass-card text-card-foreground shadow-sm border-l-4",
+        accentColor === "primary" && "border-l-primary",
+        accentColor === "secondary" && "border-l-secondary",
+        accentColor === "emerald" && "border-l-emerald-500",
+        accentColor === "orange" && "border-l-orange-500",
+        className
+      )} 
+      {...props} 
+    />
+  )
+);
+CardGlassAccent.displayName = "CardGlassAccent";
 
 const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
@@ -40,4 +68,4 @@ const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 );
 CardFooter.displayName = "CardFooter";
 
-export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent };
+export { Card, CardGlass, CardGlassHover, CardGlassAccent, CardHeader, CardFooter, CardTitle, CardDescription, CardContent };
