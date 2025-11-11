@@ -67,6 +67,67 @@ All colors MUST be HSL.
     @apply bg-black text-foreground antialiased selection:bg-primary/20 selection:text-primary;
     font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   }
+
+  /* Performance optimizations */
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Hardware acceleration for animations */
+  .animate-slide-in-bottom,
+  .animate-slide-in-right,
+  .animate-slide-in-left,
+  .animate-fade-in,
+  .animate-scale-in,
+  .animate-float {
+    will-change: transform, opacity;
+  }
+
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Focus visible styles for keyboard navigation */
+  body:not(.user-is-tabbing) button:focus,
+  body:not(.user-is-tabbing) a:focus,
+  body:not(.user-is-tabbing) input:focus {
+    outline: none;
+  }
+
+  body.user-is-tabbing button:focus-visible,
+  body.user-is-tabbing a:focus-visible,
+  body.user-is-tabbing input:focus-visible {
+    @apply ring-2 ring-primary ring-offset-2 ring-offset-background;
+  }
+
+  /* Reduced motion support */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+    
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+
+    .animate-slide-in-bottom,
+    .animate-slide-in-right,
+    .animate-slide-in-left,
+    .animate-fade-in,
+    .animate-scale-in,
+    .animate-float,
+    .animate-pulse-subtle {
+      animation: none !important;
+      will-change: auto;
+    }
+  }
 }
 
 @layer utilities {

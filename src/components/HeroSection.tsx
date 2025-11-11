@@ -1,6 +1,7 @@
 import { ChevronRight, Radar, Wifi, Sparkles, Activity, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ControlPanel from "./ControlPanel";
+import ParallaxOrb from "./ParallaxOrb";
 import stadiumImage from "@/assets/stadium-champions-league.jpg";
 import manCityLogo from "@/assets/team-logo-mancity.png";
 import arsenalLogo from "@/assets/team-logo-arsenal.png";
@@ -19,8 +20,16 @@ const HeroSection = () => {
         </div>
 
         <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute -top-24 -left-10 w-[36rem] h-[36rem] bg-secondary/10 rounded-full blur-3xl"></div>
-          <div className="absolute -bottom-32 right-0 w-[28rem] h-[28rem] bg-primary/10 rounded-full blur-3xl"></div>
+          <ParallaxOrb 
+            className="-top-24 -left-10 w-[36rem] h-[36rem]" 
+            color="secondary" 
+            speed={0.3}
+          />
+          <ParallaxOrb 
+            className="-bottom-32 right-0 w-[28rem] h-[28rem]" 
+            color="primary" 
+            speed={0.5}
+          />
         </div>
       </div>
 
@@ -98,9 +107,13 @@ const HeroSection = () => {
                       <ShieldCheck className="w-4 h-4" />
                       Kockázatkezelés aktív
                     </div>
-                    <a href="#match-selection" className="inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-gradient-to-r from-primary to-primary text-primary-foreground ring-1 ring-primary hover:ring-primary/80 transition text-xs font-semibold">
+                    <a 
+                      href="#match-selection" 
+                      className="group inline-flex items-center gap-2 h-9 px-3 rounded-lg bg-gradient-to-r from-primary to-primary text-primary-foreground ring-1 ring-primary hover:ring-primary/80 transition-all text-xs font-semibold hover:shadow-lg hover:shadow-primary/20 active:scale-95"
+                      aria-label="Ugrás a mérkőzés kiválasztáshoz"
+                    >
                       Kezdj tippelni
-                      <ChevronRight className="w-4 h-4" />
+                      <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
                     </a>
                   </div>
                 </div>
